@@ -268,25 +268,43 @@ class GCSService:
         # Start from parent of the file (exclude filename)
         # Iterate downwards: file_id/, file_type/, uploads_dir/
         for i in range(len(parts) - 1, stop_index, -1):
-            prefix = '/'.join(parts[:i]) + '/'
+            # Standard GCS "folder" prefix representation ends with '/'
+            prefix_with_slash = '/'.join(parts[:i]) + '/'
+            # Some tools may create a marker object without trailing '/'
+            prefix_no_slash = '/'.join(parts[:i])
 
             # Check for any children under this prefix besides an optional placeholder blob
             has_children = False
-            placeholder_exists = False
-            for b in self.client.list_blobs(self.settings.GCS_BUCKET_NAME, prefix=prefix):
-                if b.name == prefix:
-                    placeholder_exists = True
+            placeholder_with_slash = False
+            placeholder_no_slash = False
+
+            for b in self.client.list_blobs(self.settings.GCS_BUCKET_NAME, prefix=prefix_with_slash):
+                if b.name == prefix_with_slash:
+                    placeholder_with_slash = True
                     continue
+                # Any object that is not the exact placeholder counts as a child
                 has_children = True
                 break
 
             if not has_children:
-                # Delete placeholder blob if it exists
-                if placeholder_exists:
+                # Also check if a no-slash marker exists explicitly
+                marker_blob_no_slash = self.bucket.blob(prefix_no_slash)
+                try:
+                    if marker_blob_no_slash.exists():
+                        placeholder_no_slash = True
+                except Exception:
+                    pass
+
+                # Delete placeholder blobs if they exist
+                if placeholder_with_slash:
                     try:
-                        self.bucket.blob(prefix).delete()
+                        self.bucket.blob(prefix_with_slash).delete()
                     except Exception:
-                        # Best-effort cleanup
+                        pass
+                if placeholder_no_slash:
+                    try:
+                        marker_blob_no_slash.delete()
+                    except Exception:
                         pass
                 # continue checking next parent level
                 continue
@@ -295,7 +313,7 @@ class GCSService:
                 break
     
     def delete_user_files(self, user_id: str) -> int:
-        """Delete all files for a specific user"""
+        """Delete all files and placeholder blobs for a specific user"""
         self._ensure_initialized()
         
         if not self.client or not self.bucket:
@@ -304,13 +322,47 @@ class GCSService:
         try:
             uploads_dir = self.settings.UPLOADS_DIR_NAME.strip("/")
             prefix = f"users/{user_id}/" + (uploads_dir + "/" if uploads_dir else "")
-            blobs = self.client.list_blobs(self.settings.GCS_BUCKET_NAME, prefix=prefix)
+            blobs = list(self.client.list_blobs(self.settings.GCS_BUCKET_NAME, prefix=prefix))
             
             deleted_count = 0
             for blob in blobs:
-                blob.delete()
-                deleted_count += 1
-            
+                try:
+                    blob.delete()
+                    deleted_count += 1
+                except Exception as e:
+                    # Continue with best-effort deletion
+                    print(f"Warning: failed to delete blob {blob.name}: {e}")
+
+            # Cleanup folder markers (empty prefixes) inferred from deleted blobs
+            marker_prefixes = set()
+            for blob in blobs:
+                parts = blob.name.split("/")
+                # accumulate all parent prefixes as potential markers
+                for i in range(1, len(parts)):
+                    prefix_path = "/".join(parts[:i]) + "/"
+                    marker_prefixes.add(prefix_path)
+
+            user_root_prefix = f"users/{user_id}/"
+            for prefix_marker in marker_prefixes:
+                # Never delete above the user root; keep user-level info intact
+                if prefix_marker == user_root_prefix or prefix_marker == "users/":
+                    continue
+                marker_blob = self.bucket.blob(prefix_marker)
+                try:
+                    # exists() is cheap; only delete zero-byte markers
+                    if marker_blob.exists():
+                        try:
+                            # reload to access size safely
+                            marker_blob.reload()
+                            if not marker_blob.size:
+                                marker_blob.delete()
+                        except Exception:
+                            # If reload not available, attempt delete best-effort
+                            marker_blob.delete()
+                except Exception:
+                    # Best-effort cleanup; ignore errors
+                    pass
+
             return deleted_count
             
         except Exception as e:

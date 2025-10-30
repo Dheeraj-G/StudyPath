@@ -29,14 +29,14 @@ class FileUploadRequest(BaseModel):
 class FileUploadResponse(BaseModel):
     upload_url: str
     file_id: str
-    file_path: str
     expires_at: str
     fields: Dict[str, str]
 
 class FileUploadComplete(BaseModel):
     file_id: str
-    file_path: str
     file_size: int
+    # We no longer require clients to send file_path
+    file_path: Optional[str] = None
 
 class FileDownloadRequest(BaseModel):
     file_path: str
@@ -94,7 +94,14 @@ async def generate_upload_url(
             expires_minutes=10  # Short expiration for security
         )
         
-        return FileUploadResponse(**upload_info)
+        # Do not include raw file_path in API response
+        safe_response = {
+            "upload_url": upload_info["upload_url"],
+            "file_id": upload_info["file_id"],
+            "expires_at": upload_info["expires_at"],
+            "fields": upload_info["fields"],
+        }
+        return FileUploadResponse(**safe_response)
         
     except HTTPException:
         raise
@@ -111,15 +118,28 @@ async def complete_file_upload(
 ):
     """Mark file upload as complete and trigger processing"""
     try:
+        # Resolve file_path server-side if not provided (to avoid exposing raw paths)
+        resolved_file_path = request.file_path
+        if not resolved_file_path:
+            user_files = gcs_service.list_user_files(current_user["uid"]) or []
+            # Find by file_id
+            match = next((f for f in user_files if f.get("file_id") == request.file_id), None)
+            if not match:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Uploaded file not found for given file_id"
+                )
+            resolved_file_path = match["file_path"]
+
         # Verify file was uploaded successfully
-        if not gcs_service.verify_file_upload(request.file_path):
+        if not gcs_service.verify_file_upload(resolved_file_path):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="File upload verification failed"
             )
         
         # Get file information
-        file_info = gcs_service.get_file_info(request.file_path)
+        file_info = gcs_service.get_file_info(resolved_file_path)
         if not file_info:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -129,7 +149,7 @@ async def complete_file_upload(
         # Verify the file belongs to the current user
         uploads_dir = settings.UPLOADS_DIR_NAME.strip("/")
         user_prefix = f"users/{current_user['uid']}/" + (uploads_dir + "/" if uploads_dir else "")
-        if not request.file_path.startswith(user_prefix):
+        if not resolved_file_path.startswith(user_prefix):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied: File does not belong to user"
@@ -165,7 +185,7 @@ async def complete_file_upload(
         file_metadata = {
             "file_id": request.file_id,
             "user_id": current_user["uid"],
-            "file_path": request.file_path,
+            "file_path": resolved_file_path,
             "file_name": file_name,
             "file_size": file_size,
             "content_type": file_info["content_type"],
@@ -200,9 +220,14 @@ async def get_user_files(current_user: Dict = Depends(get_current_user)):
     """Get list of user's uploaded files from Firestore"""
     try:
         files = await firestore_service.list_user_files(current_user["uid"])
+        # Remove direct file paths from the response to avoid exposing raw URLs
+        redacted_files = []
+        for f in files:
+            f_copy = {k: v for k, v in f.items() if k != "file_path"}
+            redacted_files.append(f_copy)
         return {
-            "files": files,
-            "total": len(files)
+            "files": redacted_files,
+            "total": len(redacted_files)
         }
         
     except Exception as e:

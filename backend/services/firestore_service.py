@@ -187,7 +187,8 @@ class FirestoreService:
             doc_ref = self.db.collection('users').document(user_id)\
                 .collection('uploads').document(file_id)
             
-            doc_ref.delete()
+            # Recursively delete any nested subcollections before deleting the doc
+            self._delete_document_recursively(doc_ref)
             return True
             
         except Exception as e:
@@ -195,6 +196,21 @@ class FirestoreService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error deleting file metadata: {str(e)}"
             )
+
+    def _delete_document_recursively(self, doc_ref) -> None:
+        """Recursively delete a document and all nested subcollection documents.
+        Firestore does not delete subcollections with a single delete call.
+        """
+        try:
+            # Delete all documents in all subcollections recursively
+            for subcollection in doc_ref.collections():
+                for sub_doc in subcollection.stream():
+                    self._delete_document_recursively(sub_doc.reference)
+            # Delete the parent document last
+            doc_ref.delete()
+        except Exception as e:
+            # Surface errors to caller for HTTP handling
+            raise e
     
     # Study Plan Operations
     async def store_study_plan(self, user_id: str, study_plan: Dict) -> str:
