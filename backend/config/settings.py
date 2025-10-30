@@ -17,9 +17,12 @@ class Settings(BaseSettings):
     FIREBASE_PRIVATE_KEY: str = os.getenv("FIREBASE_PRIVATE_KEY", "")
     FIREBASE_CLIENT_EMAIL: str = os.getenv("FIREBASE_CLIENT_EMAIL", "")
     
-    # Google Cloud settings
-    GOOGLE_CLOUD_PROJECT: str = os.getenv("GOOGLE_CLOUD_PROJECT", "")
-    GCS_BUCKET_NAME: str = os.getenv("GCS_BUCKET_NAME", "studypath-uploads")
+    # Google Cloud settings (Firebase Storage uses GCS bucket)
+    GOOGLE_CLOUD_PROJECT: str = os.getenv("GOOGLE_CLOUD_PROJECT", "studypath-29e9b")
+    GCS_BUCKET_NAME: str = os.getenv("GCS_BUCKET_NAME", "studypath-29e9b.firebasestorage.app")
+    GOOGLE_APPLICATION_CREDENTIALS: str = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "service-account.json")
+    # Uploads path configuration
+    UPLOADS_DIR_NAME: str = os.getenv("UPLOADS_DIR_NAME", "uploads")
     
     # Redis settings
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379")

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { FileUploadSidebar } from "@/components/file-upload-sidebar"
 import { ChatPanel } from "@/components/chat-panel"
 import { ProgressBar } from "@/components/progress-bar"
@@ -8,8 +9,11 @@ import { RoadmapModal } from "@/components/roadmap-modal"
 import { webSocketService, type ChatMessage } from "@/lib/websocket-service"
 import { authService, type AuthUser } from "@/lib/auth-service"
 import { fileUploadService, type UploadedFile } from "@/lib/file-upload-service"
+import { Loader2 } from "lucide-react"
 
 export default function Home() {
+  const [user, setUser] = useState<AuthUser | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
   const [files, setFiles] = useState<File[]>([])
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
   const [isProcessing, setIsProcessing] = useState(false)
@@ -18,29 +22,37 @@ export default function Home() {
   const [showRoadmap, setShowRoadmap] = useState(false)
   const [roadmapData, setRoadmapData] = useState<string[]>([])
   const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [user, setUser] = useState<AuthUser | null>(null)
   const [isConnected, setIsConnected] = useState(false)
+  const router = useRouter()
 
   // Initialize authentication and WebSocket
   useEffect(() => {
+    // Check initial auth state
+    const currentUser = authService.getCurrentUser()
+    setUser(currentUser)
+    setIsLoading(false)
+
+    if (!currentUser) {
+      router.push('/signin')
+      return
+    }
+
     // Set up auth state listener
     const unsubscribe = authService.onAuthStateChange((user) => {
       setUser(user)
-      
-      if (user) {
-        // Set auth token for file upload service
-        const token = authService.getAuthToken()
-        if (token) {
-          fileUploadService.setAuthToken(token)
-        }
-        
-        // Connect to WebSocket
-        webSocketService.connect(user.uid)
-      } else {
-        // Disconnect WebSocket
-        webSocketService.disconnect()
-        setIsConnected(false)
+      if (!user) {
+        router.push('/signin')
+        return
       }
+      
+      // Set auth token for file upload service
+      const token = authService.getAuthToken()
+      if (token) {
+        fileUploadService.setAuthToken(token)
+      }
+      
+      // Connect to WebSocket
+      webSocketService.connect(user.uid)
     })
 
     // Set up WebSocket callbacks
@@ -78,13 +90,40 @@ export default function Home() {
       unsubscribe()
       webSocketService.disconnect()
     }
-  }, [])
+  }, [router])
 
   const handleFilesAdded = (newFiles: File[]) => {
     setFiles((prev) => [...prev, ...newFiles])
   }
 
-  const handleFileRemove = (index: number) => {
+  const handleFileRemove = async (index: number) => {
+    const fileToRemove = files[index]
+    
+    // Check if this file has been uploaded to the server
+    const uploadedFile = uploadedFiles.find(
+      uf => uf.file_name === fileToRemove.name && uf.file_size === fileToRemove.size
+    )
+    
+    // If file was uploaded, delete it from the server (database and storage)
+    if (uploadedFile) {
+      try {
+        const token = authService.getAuthToken()
+        if (token) {
+          fileUploadService.setAuthToken(token)
+        }
+        
+        await fileUploadService.deleteFile(uploadedFile.file_id)
+        
+        // Remove from uploadedFiles state
+        setUploadedFiles(prev => prev.filter(uf => uf.file_id !== uploadedFile.file_id))
+      } catch (error) {
+        console.error('Error deleting file from server:', error)
+        // Still remove from local state even if server delete fails
+        setUploadedFiles(prev => prev.filter(uf => uf.file_id !== uploadedFile.file_id))
+      }
+    }
+    
+    // Remove from local files array
     setFiles((prev) => prev.filter((_, i) => i !== index))
   }
 
@@ -108,6 +147,23 @@ export default function Home() {
   const handleSendMessage = (message: string) => {
     // Send message via WebSocket
     webSocketService.sendChatMessage(message)
+  }
+
+  // Show loading screen while checking authentication
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Don't render anything if user is not authenticated (will redirect)
+  if (!user) {
+    return null
   }
 
   return (

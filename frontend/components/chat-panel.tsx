@@ -6,7 +6,7 @@ import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Send, BookOpen, Wifi, WifiOff, LogIn, LogOut } from "lucide-react"
+import { Send, BookOpen, Wifi, WifiOff, LogOut } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { authService, type AuthUser } from "@/lib/auth-service"
 
@@ -22,7 +22,7 @@ interface ChatPanelProps {
   isProcessing: boolean
   hasFiles: boolean
   isConnected?: boolean
-  user?: AuthUser | null
+  user: AuthUser
 }
 
 export function ChatPanel({ messages, onSendMessage, isProcessing, hasFiles, isConnected = false, user }: ChatPanelProps) {
@@ -42,14 +42,6 @@ export function ChatPanel({ messages, onSendMessage, isProcessing, hasFiles, isC
     if (input.trim() && isProcessing && isConnected) {
       onSendMessage(input.trim())
       setInput("")
-    }
-  }
-
-  const handleSignIn = async () => {
-    try {
-      await authService.signInWithGoogle()
-    } catch (error) {
-      console.error('Sign in error:', error)
     }
   }
 
@@ -84,19 +76,12 @@ export function ChatPanel({ messages, onSendMessage, isProcessing, hasFiles, isC
             </div>
             
             {/* Authentication */}
-            {user ? (
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">{user.displayName || user.email}</span>
-                <Button variant="outline" size="sm" onClick={handleSignOut}>
-                  <LogOut className="h-4 w-4" />
-                </Button>
-              </div>
-            ) : (
-              <Button variant="outline" size="sm" onClick={handleSignIn}>
-                <LogIn className="h-4 w-4 mr-1" />
-                Sign In
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">{user.displayName || user.email}</span>
+              <Button variant="outline" size="sm" onClick={handleSignOut}>
+                <LogOut className="h-4 w-4" />
               </Button>
-            )}
+            </div>
           </div>
         </div>
       </div>
@@ -144,17 +129,16 @@ export function ChatPanel({ messages, onSendMessage, isProcessing, hasFiles, isC
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder={
-                !user ? "Sign in to start chatting..." :
                 !isConnected ? "Connecting..." :
                 !isProcessing ? "Start a learning session to begin" :
                 "Type your answer..."
               }
-              disabled={!user || !isConnected || !isProcessing}
+              disabled={!isConnected || !isProcessing}
               className="flex-1"
             />
             <Button 
               type="submit" 
-              disabled={!input.trim() || !user || !isConnected || !isProcessing}
+              disabled={!input.trim() || !isConnected || !isProcessing}
             >
               <Send className="h-4 w-4" />
             </Button>

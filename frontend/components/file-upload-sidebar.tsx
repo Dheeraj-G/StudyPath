@@ -13,7 +13,7 @@ import { authService } from "@/lib/auth-service"
 interface FileUploadSidebarProps {
   files: File[]
   onFilesAdded: (files: File[]) => void
-  onFileRemove: (index: number) => void
+  onFileRemove: (index: number) => Promise<void>
   onStartProcessing: () => void
   isProcessing: boolean
   uploadedFiles?: UploadedFile[]
@@ -214,7 +214,14 @@ export function FileUploadSidebar({
                   variant="ghost"
                   size="icon"
                   className="h-6 w-6 shrink-0"
-                  onClick={() => onFileRemove(index)}
+                  onClick={async () => {
+                    // Handle async deletion properly
+                    try {
+                      await onFileRemove(index)
+                    } catch (error) {
+                      console.error('Error removing file:', error)
+                    }
+                  }}
                   disabled={isProcessing || uploadingFiles.has(`${file.name}-${file.size}`)}
                 >
                   <X className="h-4 w-4" />

@@ -13,6 +13,7 @@ export interface FileUploadRequest {
 export interface FileUploadResponse {
   upload_url: string;
   file_id: string;
+  file_path: string;
   expires_at: string;
   fields: Record<string, string>;
 }
@@ -86,22 +87,28 @@ class FileUploadService {
   }
 
   async uploadFileToGCS(file: File, uploadInfo: FileUploadResponse): Promise<void> {
-    const formData = new FormData();
-    
-    // Add the file to FormData
-    formData.append('file', file);
+    // Upload directly to GCS using the signed URL (PUT request)
+    try {
+      const response = await fetch(uploadInfo.upload_url, {
+        method: 'PUT',
+        body: file,
+        headers: {
+          'Content-Type': file.type,
+        },
+      });
 
-    // Upload directly to GCS using the signed URL
-    const response = await fetch(uploadInfo.upload_url, {
-      method: 'PUT',
-      body: file,
-      headers: {
-        'Content-Type': file.type,
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Upload failed: ${response.statusText}`);
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'No error details available');
+        throw new Error(`Upload failed: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+    } catch (error) {
+      // Handle network errors (CORS, connection issues, etc.)
+      if (error instanceof TypeError && error.message === 'Failed to fetch') {
+        throw new Error(
+          'Failed to upload file. This may be a CORS issue. Please ensure your GCS/Firebase Storage bucket has CORS configured to allow PUT requests from your origin. See backend/CORS_SETUP.md for setup instructions.'
+        );
+      }
+      throw error;
     }
   }
 

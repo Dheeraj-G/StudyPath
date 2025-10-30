@@ -1,9 +1,0 @@
-fastapi
-uvicorn[standard]
-websockets
-firebase-admin
-google-cloud-storage
-pydantic
-python-multipart
-python-dotenv
-httpx
