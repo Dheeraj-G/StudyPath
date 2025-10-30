@@ -96,6 +96,20 @@ class WebSocketService {
     }
   }
 
+  async connectAndWait(userId: string, timeoutMs: number = 5000): Promise<void> {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
+    await this.connect(userId);
+    await new Promise<void>((resolve, reject) => {
+      const started = Date.now();
+      const check = () => {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) return resolve();
+        if (Date.now() - started > timeoutMs) return reject(new Error('WebSocket connect timeout'));
+        setTimeout(check, 100);
+      };
+      check();
+    });
+  }
+
   private scheduleReconnect() {
     this.reconnectAttempts++;
     const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
@@ -113,9 +127,10 @@ class WebSocketService {
     switch (message.type) {
       case 'response':
         if (message.content) {
+          const content = typeof message.content === 'string' ? message.content : JSON.stringify(message.content)
           this.callbacks.onMessage?.({
             role: 'assistant',
-            content: message.content,
+            content,
             timestamp: message.timestamp,
           });
         }
@@ -128,7 +143,7 @@ class WebSocketService {
         break;
       
       case 'error':
-        this.callbacks.onError?.(message.content || 'Unknown error');
+        this.callbacks.onError?.(typeof message.content === 'string' ? message.content : 'Unknown error');
         break;
       
       case 'ping':

@@ -14,6 +14,7 @@ interface FileUploadSidebarProps {
   files: File[]
   onFilesAdded: (files: File[]) => void
   onFileRemove: (index: number) => Promise<void>
+  onServerFileRemove?: (fileId: string) => Promise<void>
   onStartProcessing: () => void
   isProcessing: boolean
   uploadedFiles?: UploadedFile[]
@@ -28,6 +29,7 @@ export function FileUploadSidebar({
   isProcessing,
   uploadedFiles = [],
   onUploadedFilesChange,
+  onServerFileRemove,
 }: FileUploadSidebarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dropZoneRef = useRef<HTMLDivElement>(null)
@@ -198,7 +200,12 @@ export function FileUploadSidebar({
         </div>
 
         <div className="space-y-2">
-          {files.map((file, index) => (
+          {/* Local pending files (not yet uploaded) */}
+          {(() => {
+            const uploadedKeys = new Set(uploadedFiles.map(uf => `${uf.file_name}-${uf.file_size}`))
+            const localUnique = files.filter(f => !uploadedKeys.has(`${f.name}-${f.size}`))
+            return localUnique
+          })().map((file, index) => (
             <Card key={index} className="p-3">
               <div className="flex items-start gap-3">
                 <div className="mt-0.5 text-muted-foreground">{getFileIcon(file)}</div>
@@ -223,6 +230,38 @@ export function FileUploadSidebar({
                     }
                   }}
                   disabled={isProcessing || uploadingFiles.has(`${file.name}-${file.size}`)}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </Card>
+          ))}
+          {/* Server-side uploaded files from database */}
+          {uploadedFiles.length > 0 && uploadedFiles.map((uf, index) => (
+            <Card key={`uploaded-${uf.file_id}-${index}`} className="p-3">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 text-muted-foreground"><FileText className="h-4 w-4" /></div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-card-foreground">{uf.file_name}</p>
+                  <p className="text-xs text-muted-foreground">{formatFileSize(uf.file_size)}</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <CheckCircle className="h-4 w-4 text-green-500" />
+                    <p className="text-xs text-muted-foreground">Uploaded</p>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 shrink-0"
+                  onClick={async () => {
+                    if (!onServerFileRemove) return
+                    try {
+                      await onServerFileRemove(uf.file_id)
+                    } catch (error) {
+                      console.error('Error removing server file:', error)
+                    }
+                  }}
+                  disabled={isProcessing}
                 >
                   <X className="h-4 w-4" />
                 </Button>

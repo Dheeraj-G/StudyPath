@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     # LangGraph settings
     LANGGRAPH_API_URL: str = os.getenv("LANGGRAPH_API_URL", "http://localhost:8001")
     
+    # Groq / LLM settings
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+    GROQ_PDF_MODEL: str = os.getenv("GROQ_PDF_MODEL", "llama-3.1-70b-versatile")
+    GROQ_IMAGE_MODEL: str = os.getenv("GROQ_IMAGE_MODEL", "llama-3.2-11b-vision-preview")
+    GROQ_AUDIO_MODEL: str = os.getenv("GROQ_AUDIO_MODEL", "llama-3.1-8b-instant")
+    
     # Pub/Sub settings
     PUBSUB_TOPIC_NAME: str = os.getenv("PUBSUB_TOPIC_NAME", "studypath-processing")
     

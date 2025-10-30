@@ -53,6 +53,16 @@ export default function Home() {
       
       // Connect to WebSocket
       webSocketService.connect(user.uid)
+
+      // Load previously uploaded files for this user
+      ;(async () => {
+        try {
+          const files = await fileUploadService.getUserFiles()
+          setUploadedFiles(files)
+        } catch (e) {
+          console.error('Failed to load uploaded files:', e)
+        }
+      })()
     })
 
     // Set up WebSocket callbacks
@@ -93,7 +103,14 @@ export default function Home() {
   }, [router])
 
   const handleFilesAdded = (newFiles: File[]) => {
-    setFiles((prev) => [...prev, ...newFiles])
+    // Build a set of existing keys (name-size) from local and server files to avoid duplicates
+    const existingKeys = new Set<string>()
+    for (const f of files) existingKeys.add(`${f.name}-${f.size}`)
+    for (const uf of uploadedFiles) existingKeys.add(`${uf.file_name}-${uf.file_size}`)
+
+    const deduped = newFiles.filter(f => !existingKeys.has(`${f.name}-${f.size}`))
+    if (deduped.length === 0) return
+    setFiles((prev) => [...prev, ...deduped])
   }
 
   const handleFileRemove = async (index: number) => {
@@ -127,10 +144,20 @@ export default function Home() {
     setFiles((prev) => prev.filter((_, i) => i !== index))
   }
 
-  const handleStartProcessing = () => {
+  const handleStartProcessing = async () => {
     if (uploadedFiles.length === 0) return
 
     setIsProcessing(true)
+    // Ensure WS is connected before sending
+    try {
+      const u = authService.getCurrentUser()
+      if (u && !isConnected) {
+        await webSocketService.connectAndWait(u.uid)
+        setIsConnected(true)
+      }
+    } catch (e) {
+      console.error('WebSocket connect failed:', e)
+    }
     
     // Send file upload notification to WebSocket
     const fileIds = uploadedFiles.map(f => f.file_id)
@@ -142,6 +169,23 @@ export default function Home() {
       content: 'Starting to process your uploaded materials. This may take a few moments...',
       timestamp: new Date().toISOString()
     }])
+
+    // Trigger backend learning session to start parsing pipeline
+    try {
+      const token = authService.getAuthToken()
+      if (token) fileUploadService.setAuthToken(token)
+      const topic = 'Learning Session'
+      const goals = ['Parse uploaded materials']
+      const res = await fileUploadService.startLearningSession(topic, goals)
+      console.log('Learning session started:', res)
+    } catch (e) {
+      console.error('Failed to start learning session:', e)
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: 'Failed to start learning session. Please try again.',
+        timestamp: new Date().toISOString()
+      }])
+    }
   }
 
   const handleSendMessage = (message: string) => {
@@ -175,6 +219,17 @@ export default function Home() {
           files={files}
           onFilesAdded={handleFilesAdded}
           onFileRemove={handleFileRemove}
+          onServerFileRemove={async (fileId: string) => {
+            try {
+              const token = authService.getAuthToken()
+              if (token) fileUploadService.setAuthToken(token)
+              await fileUploadService.deleteFile(fileId)
+              setUploadedFiles(prev => prev.filter(uf => uf.file_id !== fileId))
+            } catch (error) {
+              console.error('Error deleting server file:', error)
+              setUploadedFiles(prev => prev.filter(uf => uf.file_id !== fileId))
+            }
+          }}
           onStartProcessing={handleStartProcessing}
           isProcessing={isProcessing}
           uploadedFiles={uploadedFiles}

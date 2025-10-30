@@ -197,6 +197,55 @@ class FirestoreService:
                 detail=f"Error deleting file metadata: {str(e)}"
             )
 
+    async def add_derived_asset(self, user_id: str, file_id: str, asset_data: Dict) -> str:
+        """Add a derived asset (e.g., processed image from a PDF) under an upload.
+        Stored under users/{user_id}/uploads/{file_id}/derived_assets/{asset_id}.
+        """
+        self._ensure_initialized()
+        if not self.db:
+            return ""
+        try:
+            col_ref = self.db.collection('users').document(user_id)\
+                .collection('uploads').document(file_id)\
+                .collection('derived_assets')
+            doc_ref = col_ref.document()
+            payload = {
+                **asset_data,
+                'user_id': user_id,
+                'file_id': file_id,
+                'created_at': datetime.utcnow(),
+                'updated_at': datetime.utcnow(),
+            }
+            doc_ref.set(payload)
+            return doc_ref.id
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error adding derived asset: {str(e)}"
+            )
+
+    async def list_derived_assets(self, user_id: str, file_id: str) -> List[Dict]:
+        """List derived assets for a given upload."""
+        self._ensure_initialized()
+        if not self.db:
+            return []
+        try:
+            col_ref = self.db.collection('users').document(user_id)\
+                .collection('uploads').document(file_id)\
+                .collection('derived_assets')
+            docs = col_ref.stream()
+            assets: List[Dict] = []
+            for doc in docs:
+                d = doc.to_dict()
+                d['asset_id'] = doc.id
+                assets.append(d)
+            return assets
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error listing derived assets: {str(e)}"
+            )
+
     def _delete_document_recursively(self, doc_ref) -> None:
         """Recursively delete a document and all nested subcollection documents.
         Firestore does not delete subcollections with a single delete call.

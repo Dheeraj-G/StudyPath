@@ -15,6 +15,7 @@ from auth.firebase_auth import verify_firebase_token
 from config.settings import get_settings
 from websocket.connection_manager import ConnectionManager
 from services.firestore_service import firestore_service
+from services.langgraph_pipeline import run_learning_session_pipeline
 from models.study_models import (
     ChatMessage, ProcessingRequest, AgentResponse,
     StudyPlanRequest, LearningSession, ProcessingStatus
@@ -168,6 +169,19 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     user_info = await verify_firebase_token(token)
     return user_info
 
+
+class SignedUrlParseRequest(BaseModel):
+    pdf_urls: List[str] = []
+    image_urls: List[str] = []
+    audio_urls: List[str] = []
+
+class StartLearningSessionRequest(BaseModel):
+    topic: Optional[str] = None
+    goals: List[str] = []
+    session_type: str = "ad-hoc"
+    duration_minutes: int = 30
+
+
 @router.post("/chat")
 async def send_chat_message(
     request: ChatMessage,
@@ -250,6 +264,10 @@ async def process_files(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error starting file processing: {str(e)}"
         )
+
+"""The direct parsing endpoint was intentionally removed.
+Parsing now only occurs after starting a learning session.
+"""
 
 @router.get("/status/{task_id}")
 async def get_processing_status(
@@ -365,15 +383,31 @@ async def get_user_study_plan(current_user: Dict = Depends(get_current_user)):
 
 @router.post("/learning-session")
 async def start_learning_session(
-    session_data: LearningSession,
+    session_data: StartLearningSessionRequest,
     current_user: Dict = Depends(get_current_user)
 ):
     """Start a new learning session"""
     try:
-        session_dict = session_data.dict()
-        session_dict["user_id"] = current_user["uid"]
+        session_dict = {
+            "user_id": current_user["uid"],
+            "session_type": session_data.session_type,
+            "duration_minutes": session_data.duration_minutes,
+            "notes": session_data.topic or "Learning Session",
+        }
         session_id = await firestore_service.store_learning_session(current_user["uid"], session_dict)
-        
+
+        # Fetch user's files and kick off background parsing
+        user_files = await firestore_service.list_user_files(current_user["uid"])  # metadata includes file_path
+        # Fire and forget: we don't block the response
+        async def _bg():
+            try:
+                await run_learning_session_pipeline(current_user["uid"], user_files)
+            except Exception as e:
+                print(f"Learning session pipeline error: {e}")
+
+        import asyncio as _asyncio
+        _asyncio.create_task(_bg())
+
         return {
             "message": "Learning session started",
             "session_id": session_id,

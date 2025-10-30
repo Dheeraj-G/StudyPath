@@ -50,9 +50,9 @@ class FileUploadService {
     options: RequestInit = {}
   ): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
-    const headers: HeadersInit = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...options.headers,
+      ...(options.headers as Record<string, string> | undefined),
     };
 
     if (this.authToken) {
@@ -158,6 +158,13 @@ class FileUploadService {
   async deleteFile(fileId: string): Promise<void> {
     await this.makeRequest(`/api/files/files/${fileId}`, {
       method: 'DELETE',
+    });
+  }
+
+  async startLearningSession(topic: string, goals: string[] = []): Promise<{ session_id: string; status: string }> {
+    return this.makeRequest(`/api/orchestrator/learning-session`, {
+      method: 'POST',
+      body: JSON.stringify({ topic, goals }),
     });
   }
 
