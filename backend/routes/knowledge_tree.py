@@ -176,3 +176,49 @@ async def list_knowledge_trees(
             detail=f"Error listing knowledge trees: {str(e)}"
         )
 
+
+@router.post("/quiz-results")
+async def store_quiz_results(
+    quiz_data: dict,
+    current_user: dict = Depends(get_current_user)
+):
+    """Store quiz results for the current user"""
+    try:
+        user_id = current_user["uid"]
+        result_id = await firestore_service.store_quiz_results(user_id, quiz_data)
+        return {
+            "result_id": result_id,
+            "status": "stored"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error storing quiz results: {str(e)}"
+        )
+
+
+@router.get("/quiz-results/last")
+async def get_last_quiz_results(
+    current_user: dict = Depends(get_current_user)
+):
+    """Get the last quiz results for the current user"""
+    try:
+        user_id = current_user["uid"]
+        results = await firestore_service.get_last_quiz_results(user_id)
+        
+        if not results:
+            return {
+                "message": "No quiz results found"
+            }
+        
+        return results
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting last quiz results: {str(e)}"
+        )
+

@@ -102,6 +102,23 @@ class KnowledgeTreeService {
     }
   }
 
+  async storeQuizResults(quizResults: any, trees: any[]): Promise<any> {
+    const response = await this.makeRequest<any>('/api/knowledge-trees/quiz-results', {
+      method: 'POST',
+      body: JSON.stringify({
+        quizResults,
+        trees,
+        timestamp: new Date().toISOString()
+      })
+    })
+    return response
+  }
+
+  async getLastQuizResults(): Promise<any> {
+    const response = await this.makeRequest<any>('/api/knowledge-trees/quiz-results/last')
+    return response
+  }
+
   /**
    * Flatten all questions from knowledge trees with their node information
    */

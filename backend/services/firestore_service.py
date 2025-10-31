@@ -639,6 +639,59 @@ class FirestoreService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error listing knowledge trees: {str(e)}"
             )
+    
+    # Quiz Results Operations
+    async def store_quiz_results(self, user_id: str, quiz_data: Dict) -> str:
+        """Store quiz results for a user"""
+        self._ensure_initialized()
+        
+        if not self.db:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Firestore not available"
+            )
+        
+        try:
+            results_col = self.db.collection('users').document(user_id).collection('quiz_results')
+            doc_ref = results_col.document()
+            
+            quiz_data['user_id'] = user_id
+            quiz_data['created_at'] = datetime.utcnow()
+            quiz_data['updated_at'] = datetime.utcnow()
+            
+            doc_ref.set(quiz_data)
+            return doc_ref.id
+            
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error storing quiz results: {str(e)}"
+            )
+    
+    async def get_last_quiz_results(self, user_id: str) -> Optional[Dict]:
+        """Get the last quiz results for a user"""
+        self._ensure_initialized()
+        
+        if not self.db:
+            return None
+        
+        try:
+            results_col = self.db.collection('users').document(user_id).collection('quiz_results')
+            docs = results_col.order_by('created_at', direction=firestore.Query.DESCENDING)\
+                .limit(1).stream()
+            
+            for doc in docs:
+                result_data = doc.to_dict()
+                result_data['quiz_result_id'] = doc.id
+                return result_data
+            
+            return None
+            
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error getting last quiz results: {str(e)}"
+            )
 
 # Global Firestore service instance
 firestore_service = FirestoreService()

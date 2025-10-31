@@ -6,7 +6,7 @@ import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Send, BookOpen, Wifi, WifiOff, LogOut, Loader2 } from "lucide-react"
+import { Send, BookOpen, Wifi, WifiOff, LogOut, Loader2, BarChart3 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { authService, type AuthUser } from "@/lib/auth-service"
 
@@ -40,6 +40,8 @@ interface ChatPanelProps {
   onAnswerClick?: (answer: string) => void
   isGeneratingQuestions?: boolean
   isQuestionAnswered?: boolean
+  onShowLastQuizResults?: () => void
+  hasLastQuizResults?: boolean
 }
 
 export function ChatPanel({ 
@@ -53,7 +55,9 @@ export function ChatPanel({
   currentQuestion,
   onAnswerClick,
   isGeneratingQuestions = false,
-  isQuestionAnswered = false
+  isQuestionAnswered = false,
+  onShowLastQuizResults,
+  hasLastQuizResults = false
 }: ChatPanelProps) {
   const [input, setInput] = useState("")
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -103,6 +107,19 @@ export function ChatPanel({
                 {isConnected ? 'Connected' : 'Disconnected'}
               </span>
             </div>
+            
+            {/* Show Last Quiz Results Button */}
+            {hasLastQuizResults && onShowLastQuizResults && (
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={onShowLastQuizResults}
+                className="gap-2"
+              >
+                <BarChart3 className="h-4 w-4" />
+                <span className="text-xs">Last Quiz Results</span>
+              </Button>
+            )}
             
             {/* Authentication */}
             <div className="flex items-center gap-2">

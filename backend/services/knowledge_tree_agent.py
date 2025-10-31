@@ -124,11 +124,17 @@ Concept: {concept}
 Context: {context}
 Level: {level}
 
+CRITICAL INSTRUCTIONS:
+- ONLY use information from the provided Context above. Do NOT use any external knowledge.
+- If the context does not contain sufficient information to create a question about the concept, indicate this clearly.
+- All questions, answers, and explanations MUST be derived solely from the provided context.
+- Do not add information that is not present in the context.
+
 Instructions:
-1. Create a clear, unambiguous multiple choice question that tests understanding of this concept
-2. Provide 4 answer options (A, B, C, D)
-3. Exactly one answer should be correct
-4. The incorrect answers (distractors) should be plausible but clearly wrong
+1. Create a clear, unambiguous multiple choice question that tests understanding of this concept based ONLY on the context provided
+2. Provide 4 answer options (A, B, C, D) that are all derived from the context
+3. Exactly one answer should be correct based on the context
+4. The incorrect answers (distractors) should be plausible but clearly wrong based on the context
 5. Make questions appropriate for the concept level (level {level})
 6. Return ONLY valid JSON in this exact format:
    {{
@@ -140,8 +146,16 @@ Instructions:
        "D": "Fourth option"
      }},
      "correct_answer": "A",
-     "explanation": "Brief explanation of why the correct answer is correct"
+     "explanation": "Brief explanation of why the correct answer is correct (based only on the context)"
    }}
+
+IMPORTANT: If the context does not contain enough information to create a valid question, return:
+{{
+  "question": null,
+  "options": {{}},
+  "correct_answer": "",
+  "explanation": "Insufficient information in context to generate question"
+}}
 
 Return the JSON structure now:"""
         )

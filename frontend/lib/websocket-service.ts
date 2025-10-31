@@ -231,16 +231,20 @@ class WebSocketService {
         break;
       
       case 'knowledge_tree_complete':
+        // Handle knowledge tree completion - trigger fetching of trees
+        console.log('🌳 Knowledge tree complete message received:', message);
+        this.callbacks.onProcessingComplete?.(
+          message.content || 'Knowledge trees generated successfully!',
+          message.data
+        );
+        break;
+      
       case 'knowledge_tree_error':
-        // Handle knowledge tree completion/error
-        if (message.content) {
-          const type = message.type === 'knowledge_tree_complete' ? 'success' : 'error';
-          if (type === 'success') {
-            this.callbacks.onProcessingComplete?.(message.content, message.data);
-          } else if (type === 'error') {
-            this.callbacks.onProcessingError?.(message.content, message.data?.error);
-          }
-        }
+        // Handle knowledge tree error
+        this.callbacks.onProcessingError?.(
+          message.content || 'Knowledge tree generation failed',
+          message.data?.error
+        );
         break;
       
       default:

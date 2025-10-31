@@ -7,6 +7,7 @@ import { ChatPanel } from "@/components/chat-panel"
 import { ProgressBar } from "@/components/progress-bar"
 import { RoadmapModal } from "@/components/roadmap-modal"
 import { QuizReadyModal } from "@/components/quiz-ready-modal"
+import { QuizResultsModal } from "@/components/quiz-results-modal"
 import { NotificationContainer, type Notification } from "@/components/notification"
 import { webSocketService, type ChatMessage } from "@/lib/websocket-service"
 import { authService, type AuthUser } from "@/lib/auth-service"
@@ -51,6 +52,9 @@ export default function Home() {
   }>>([])
   const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false)
   const [answeredQuestionIndex, setAnsweredQuestionIndex] = useState<number | null>(null)
+  const [knowledgeTrees, setKnowledgeTrees] = useState<any[]>([])
+  const [showQuizResultsModal, setShowQuizResultsModal] = useState(false)
+  const [hasLastQuizResults, setHasLastQuizResults] = useState(false)
   const router = useRouter()
 
   // Helper function to add notifications
@@ -58,6 +62,34 @@ export default function Home() {
     const id = `${Date.now()}-${Math.random()}`
     setNotifications((prev) => [...prev, { id, message, type }])
   }
+
+  // Check if last quiz results exist when user is authenticated
+  useEffect(() => {
+    const checkLastQuizResults = async () => {
+      if (!user) return
+      
+      try {
+        const token = authService.getAuthToken()
+        if (!token) return
+        
+        knowledgeTreeService.setAuthToken(token)
+        const lastResults = await knowledgeTreeService.getLastQuizResults()
+        
+        if (lastResults && lastResults.message !== "No quiz results found") {
+          setHasLastQuizResults(true)
+        } else {
+          setHasLastQuizResults(false)
+        }
+      } catch (error) {
+        console.error('Error checking last quiz results:', error)
+        setHasLastQuizResults(false)
+      }
+    }
+    
+    if (user) {
+      checkLastQuizResults()
+    }
+  }, [user])
 
   const dismissNotification = (id: string) => {
     setNotifications((prev) => prev.filter((n) => n.id !== id))
@@ -146,62 +178,131 @@ export default function Home() {
           }
         }))
       },
-      onProcessingComplete: async (message: string) => {
-        // Set processing to false
-        setIsProcessing(false)
-        console.log('✅ Processing completed:', message)
+      onProcessingComplete: async (message: string, data?: any) => {
+        console.log('✅ Processing completed:', message, data)
         
-        // Check if knowledge trees are ready and show modal
-        const isKnowledgeTreeMessage = message.includes('Knowledge trees') || message.includes('Knowledge tree') || message.includes('knowledge')
+        // Check if this is a knowledge tree completion message
+        const isKnowledgeTreeMessage = message && (
+          message.toLowerCase().includes('knowledge tree') || 
+          message.toLowerCase().includes('knowledge trees') ||
+          message.includes('🌳') ||
+          (data && (data.tree_id || data.status === 'completed'))
+        )
         
-        // Show notification only for non-knowledge-tree messages
+        // Set processing to false if it's not a knowledge tree message
+        // (knowledge tree messages should keep processing state until trees are fetched)
         if (!isKnowledgeTreeMessage) {
+          setIsProcessing(false)
           addNotification(message, "success")
-        }
-        
-        if (isKnowledgeTreeMessage) {
-          // Don't show notification for knowledge tree completion - loading screen handles this
+        } else {
+          // This is a knowledge tree completion - fetch and display trees
+          console.log('🌳 Knowledge tree generation completed, fetching trees...')
           setIsGeneratingQuestions(true)
+          
           try {
             const token = authService.getAuthToken()
-            if (token) {
-              knowledgeTreeService.setAuthToken(token)
-              // Wait a bit for the knowledge tree to be fully stored
-              setTimeout(async () => {
-                try {
-                  const trees = await knowledgeTreeService.getKnowledgeTrees()
-                  console.log('📦 Fetched knowledge trees:', trees)
-                  
-                  // Handle different response structures
-                  let treesArray: any[] = []
-                  if (trees && trees.trees && Array.isArray(trees.trees)) {
-                    treesArray = trees.trees
-                  } else if (Array.isArray(trees)) {
-                    treesArray = trees
-                  } else if (trees && typeof trees === 'object') {
-                    treesArray = [trees]
-                  }
-                  
-                  const questions = knowledgeTreeService.flattenQuestions(treesArray as any)
-                  console.log(`📝 Flattened ${questions.length} questions from ${treesArray.length} trees`)
-                  
-                  setIsGeneratingQuestions(false)
-                  
-                  if (questions.length > 0) {
-                    setQuizQuestions(questions)
-                    setShowQuizReadyModal(true)
+            if (!token) {
+              console.error('No auth token available')
+              setIsGeneratingQuestions(false)
+              setIsProcessing(false)
+              return
+            }
+            
+            knowledgeTreeService.setAuthToken(token)
+            
+            // Retry logic to fetch trees (they might take a moment to be stored)
+            const fetchTreesWithRetry = async (attempt: number = 0, maxAttempts: number = 5): Promise<void> => {
+              try {
+                console.log(`📦 Attempting to fetch knowledge trees (attempt ${attempt + 1}/${maxAttempts})...`)
+                const trees = await knowledgeTreeService.getKnowledgeTrees()
+                console.log('📦 Fetched knowledge trees:', trees)
+                
+                // Handle different response structures
+                let treesArray: any[] = []
+                if (trees && trees.trees && Array.isArray(trees.trees)) {
+                  treesArray = trees.trees
+                } else if (Array.isArray(trees)) {
+                  treesArray = trees
+                } else if (trees && typeof trees === 'object' && trees !== null) {
+                  // Check if it's a single tree or wrapper object
+                  const treesAny = trees as any
+                  if (treesAny.root_concept || treesAny.tree) {
+                    treesArray = [treesAny]
                   } else {
-                    console.warn('⚠️ No questions found in knowledge trees')
+                    // Try to extract trees from the object
+                    Object.values(treesAny).forEach((value: any) => {
+                      if (Array.isArray(value)) {
+                        treesArray.push(...value)
+                      } else if (value && typeof value === 'object' && (value.root_concept || value.tree)) {
+                        treesArray.push(value)
+                      }
+                    })
+                  }
+                }
+                
+                if (treesArray.length === 0 && attempt < maxAttempts - 1) {
+                  // No trees found yet, retry after a delay
+                  console.log(`⏳ No trees found yet, retrying in 2 seconds...`)
+                  setTimeout(() => fetchTreesWithRetry(attempt + 1, maxAttempts), 2000)
+                  return
+                }
+                
+                console.log(`📝 Found ${treesArray.length} knowledge trees`)
+                
+                const questions = knowledgeTreeService.flattenQuestions(treesArray as any)
+                console.log(`📝 Flattened ${questions.length} questions from ${treesArray.length} trees`)
+                
+                // Store the full trees for the results modal
+                setKnowledgeTrees(treesArray)
+                setIsGeneratingQuestions(false)
+                setIsProcessing(false)
+                
+                if (questions.length > 0) {
+                  setQuizQuestions(questions)
+                  setShowQuizReadyModal(true)
+                  addNotification(`Generated ${questions.length} quiz questions!`, "success")
+                } else {
+                  console.warn('⚠️ No questions found in knowledge trees')
+                  addNotification('Knowledge trees generated, but no questions found', "warning")
+                  setIsGeneratingQuestions(false)
+                  setIsProcessing(false)
+                }
+                
+                // Check for last quiz results after loading knowledge trees
+                try {
+                  const lastResults = await knowledgeTreeService.getLastQuizResults()
+                  if (lastResults && lastResults.message !== "No quiz results found") {
+                    setHasLastQuizResults(true)
+                  } else {
+                    setHasLastQuizResults(false)
                   }
                 } catch (error) {
-                  console.error('Error fetching knowledge trees:', error)
-                  setIsGeneratingQuestions(false)
+                  console.error('Error checking last quiz results:', error)
+                  setHasLastQuizResults(false)
                 }
-              }, 2000) // Wait 2 seconds for storage to complete
+                
+              } catch (error) {
+                console.error(`Error fetching knowledge trees (attempt ${attempt + 1}):`, error)
+                if (attempt < maxAttempts - 1) {
+                  // Retry after a delay
+                  setTimeout(() => fetchTreesWithRetry(attempt + 1, maxAttempts), 2000)
+                } else {
+                  console.error('Failed to fetch knowledge trees after all retries')
+                  addNotification('Failed to load knowledge trees. Please try again.', "error")
+                  setIsGeneratingQuestions(false)
+                  setIsProcessing(false)
+                }
+              }
             }
+            
+            // Start fetching with retry logic
+            setTimeout(() => fetchTreesWithRetry(), 1000) // Wait 1 second before first attempt
+            
           } catch (error) {
             console.error('Error setting up knowledge tree fetch:', error)
+            addNotification('Failed to fetch knowledge trees', "error")
             setIsGeneratingQuestions(false)
+            setIsProcessing(false)
           }
         }
       },
@@ -416,7 +517,54 @@ export default function Home() {
         
         setIsQuizActive(false)
         addNotification(`Quiz completed! You got ${correctCount} out of ${quizQuestions.length} questions correct.`, "success")
+        
+        // Store quiz results
+        const storeResults = async () => {
+          try {
+            const token = authService.getAuthToken()
+            if (token) {
+              knowledgeTreeService.setAuthToken(token)
+              await knowledgeTreeService.storeQuizResults(updatedResults, knowledgeTrees)
+              console.log('✅ Quiz results stored successfully')
+              setHasLastQuizResults(true)
+            }
+          } catch (error) {
+            console.error('Error storing quiz results:', error)
+            // Don't block the UI if storage fails
+          }
+        }
+        storeResults()
+        
+        // Show results modal after a short delay
+        setTimeout(() => {
+          setShowQuizResultsModal(true)
+        }, 500)
       }, 2000)
+    }
+  }
+
+  const handleShowLastQuizResults = async () => {
+    try {
+      const token = authService.getAuthToken()
+      if (!token) return
+      
+      knowledgeTreeService.setAuthToken(token)
+      const lastResults = await knowledgeTreeService.getLastQuizResults()
+      
+      if (lastResults && lastResults.message === "No quiz results found") {
+        addNotification('No previous quiz results found.', "info")
+        return
+      }
+      
+      if (lastResults && lastResults.quizResults && lastResults.trees) {
+        setQuizResults(lastResults.quizResults)
+        setKnowledgeTrees(lastResults.trees)
+        setShowQuizResultsModal(true)
+        addNotification('Loaded previous quiz results', "success")
+      }
+    } catch (error) {
+      console.error('Error loading last quiz results:', error)
+      addNotification('Failed to load previous quiz results', "error")
     }
   }
 
@@ -503,6 +651,8 @@ export default function Home() {
           onAnswerClick={handleAnswerClick}
           isGeneratingQuestions={isGeneratingQuestions}
           isQuestionAnswered={answeredQuestionIndex === currentQuestionIndex}
+          onShowLastQuizResults={handleShowLastQuizResults}
+          hasLastQuizResults={hasLastQuizResults}
         />
       </div>
 
@@ -511,6 +661,12 @@ export default function Home() {
         isOpen={showQuizReadyModal} 
         totalQuestions={quizQuestions.length}
         onStart={handleStartQuiz}
+      />
+      <QuizResultsModal
+        isOpen={showQuizResultsModal}
+        trees={knowledgeTrees}
+        quizResults={quizResults}
+        onClose={() => setShowQuizResultsModal(false)}
       />
     </div>
   )
