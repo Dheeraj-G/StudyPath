@@ -106,7 +106,7 @@ class FirestoreService:
         try:
             files_ref = self.db.collection('users').document(user_id).collection('uploads')
             # Query for files with matching name and size
-            query = files_ref.where('file_name', '==', file_name).where('file_size', '==', file_size)
+            query = files_ref.where(filter=FieldFilter('file_name', '==', file_name)).where(filter=FieldFilter('file_size', '==', file_size))
             docs = query.limit(1).stream()
             
             for doc in docs:
@@ -299,7 +299,7 @@ class FirestoreService:
                 # Get latest active study plan
                 plans_ref = self.db.collection('users').document(user_id)\
                     .collection('study_plans')
-                docs = plans_ref.where('status', '==', 'active')\
+                docs = plans_ref.where(filter=FieldFilter('status', '==', 'active'))\
                     .order_by('created_at', direction=firestore.Query.DESCENDING)\
                     .limit(1).stream()
                 
@@ -541,6 +541,40 @@ class FirestoreService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error updating user profile: {str(e)}"
             )
+    
+    async def delete_parsed_content_for_file(self, user_id: str, file_path: str) -> bool:
+        """Delete parsed content entries that reference a specific file path"""
+        self._ensure_initialized()
+        
+        if not self.db:
+            print("Warning: Firestore not available, skipping parsed content deletion")
+            return False
+            
+        try:
+            parsed_content_ref = self.db.collection('users').document(user_id)\
+                .collection('parsed_content')
+            
+            # Query all parsed content documents
+            docs = parsed_content_ref.stream()
+            
+            deleted_count = 0
+            for doc in docs:
+                doc_data = doc.to_dict()
+                # Check if this parsed content references the file_path
+                file_paths = doc_data.get('file_paths', [])
+                if file_path in file_paths:
+                    # Delete this parsed content document
+                    doc.reference.delete()
+                    deleted_count += 1
+            
+            if deleted_count > 0:
+                print(f"Deleted {deleted_count} parsed content entries for file: {file_path}")
+            
+            return deleted_count > 0
+            
+        except Exception as e:
+            print(f"Error deleting parsed content for file {file_path}: {str(e)}")
+            return False
 
 # Global Firestore service instance
 firestore_service = FirestoreService()

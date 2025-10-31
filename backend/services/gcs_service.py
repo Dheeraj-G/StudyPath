@@ -224,6 +224,29 @@ class GCSService:
             print(f"Error listing user files: {str(e)}")
             return []
     
+    def delete_files_by_prefix(self, prefix: str) -> int:
+        """Delete all files in GCS that match the given prefix"""
+        self._ensure_initialized()
+        
+        if not self.client or not self.bucket:
+            return 0
+            
+        try:
+            deleted_count = 0
+            blobs = self.client.list_blobs(self.settings.GCS_BUCKET_NAME, prefix=prefix)
+            
+            for blob in blobs:
+                try:
+                    blob.delete()
+                    deleted_count += 1
+                except Exception as e:
+                    print(f"Warning: Failed to delete blob {blob.name}: {e}")
+            
+            return deleted_count
+        except Exception as e:
+            print(f"Error deleting files by prefix {prefix}: {str(e)}")
+            return 0
+    
     def delete_file(self, file_path: str) -> bool:
         """Delete a file from GCS"""
         self._ensure_initialized()

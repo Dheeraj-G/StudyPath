@@ -11,10 +11,17 @@ export interface ChatMessage {
 }
 
 export interface WebSocketMessage {
-  type: 'chat' | 'file_upload' | 'response' | 'error' | 'ping' | 'agent_response';
+  type: 'chat' | 'file_upload' | 'response' | 'error' | 'ping' | 'agent_response' | 'parsing_progress' | 'processing_complete' | 'processing_error';
   content?: string;
   data?: any;
   timestamp: string;
+}
+
+export interface ParsingProgress {
+  file_type: string;
+  parsed: number;
+  total: number;
+  percentage: number;
 }
 
 export interface WebSocketCallbacks {
@@ -23,6 +30,9 @@ export interface WebSocketCallbacks {
   onConnect?: () => void;
   onDisconnect?: () => void;
   onAgentResponse?: (agentType: string, response: any) => void;
+  onParsingProgress?: (progress: ParsingProgress) => void;
+  onProcessingComplete?: (message: string, data?: any) => void;
+  onProcessingError?: (message: string, error?: string) => void;
 }
 
 class WebSocketService {
@@ -84,9 +94,16 @@ class WebSocketService {
       };
 
       this.ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
+        // WebSocket error events don't have useful properties, but we can log the connection attempt
+        const attemptedUrl = `${this.baseUrl}/ws/${userId}`;
+        console.error('WebSocket connection error:', {
+          url: attemptedUrl,
+          readyState: this.ws?.readyState,
+          userId: userId,
+          error: error
+        });
         this.isConnecting = false;
-        this.callbacks.onError?.('WebSocket connection error');
+        this.callbacks.onError?.('WebSocket connection failed. Please check if the backend server is running.');
       };
 
     } catch (error) {
@@ -149,6 +166,42 @@ class WebSocketService {
       case 'ping':
         // Respond to ping with pong
         this.sendMessage('pong', {});
+        break;
+      
+      case 'parsing_progress':
+        if (message.data) {
+          this.callbacks.onParsingProgress?.(message.data);
+        }
+        break;
+      
+      case 'processing_complete':
+        this.callbacks.onProcessingComplete?.(
+          message.content || 'Processing completed successfully',
+          message.data
+        );
+        // Also add as a regular message
+        if (message.content) {
+          this.callbacks.onMessage?.({
+            role: 'assistant',
+            content: message.content,
+            timestamp: message.timestamp,
+          });
+        }
+        break;
+      
+      case 'processing_error':
+        this.callbacks.onProcessingError?.(
+          message.content || 'Processing failed',
+          message.data?.error
+        );
+        // Also add as an error message
+        if (message.content) {
+          this.callbacks.onMessage?.({
+            role: 'assistant',
+            content: message.content,
+            timestamp: message.timestamp,
+          });
+        }
         break;
       
       default:

@@ -23,6 +23,7 @@ export default function Home() {
   const [roadmapData, setRoadmapData] = useState<string[]>([])
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isConnected, setIsConnected] = useState(false)
+  const [parsingProgress, setParsingProgress] = useState<{[key: string]: {parsed: number, total: number, percentage: number}}>({})
   const router = useRouter()
 
   // Initialize authentication and WebSocket
@@ -37,7 +38,35 @@ export default function Home() {
       return
     }
 
-    // Set up auth state listener
+    // Load user documents immediately on initial page load
+    const loadUserDocuments = async (user: AuthUser) => {
+      // Set auth token for file upload service
+      const token = authService.getAuthToken()
+      if (token) {
+        fileUploadService.setAuthToken(token)
+      }
+      
+      // Load previously uploaded files for this user (don't wait for WebSocket)
+      try {
+        const files = await fileUploadService.getUserFiles()
+        setUploadedFiles(files)
+      } catch (e) {
+        console.error('Failed to load uploaded files:', e)
+      }
+
+      // Connect to WebSocket (non-blocking, failures won't prevent document loading)
+      try {
+        await webSocketService.connect(user.uid)
+      } catch (e) {
+        console.warn('WebSocket connection failed (this is non-critical):', e)
+        // WebSocket failures are not critical for document loading
+      }
+    }
+
+    // Load documents immediately if user is already authenticated
+    loadUserDocuments(currentUser)
+
+    // Set up auth state listener for subsequent auth changes
     const unsubscribe = authService.onAuthStateChange((user) => {
       setUser(user)
       if (!user) {
@@ -45,24 +74,8 @@ export default function Home() {
         return
       }
       
-      // Set auth token for file upload service
-      const token = authService.getAuthToken()
-      if (token) {
-        fileUploadService.setAuthToken(token)
-      }
-      
-      // Connect to WebSocket
-      webSocketService.connect(user.uid)
-
-      // Load previously uploaded files for this user
-      ;(async () => {
-        try {
-          const files = await fileUploadService.getUserFiles()
-          setUploadedFiles(files)
-        } catch (e) {
-          console.error('Failed to load uploaded files:', e)
-        }
-      })()
+      // Load documents when auth state changes (e.g., user signs in)
+      loadUserDocuments(user)
     })
 
     // Set up WebSocket callbacks
@@ -93,6 +106,38 @@ export default function Home() {
           content: `[${agentType}] ${response.message || 'Processing...'}`,
           timestamp: new Date().toISOString()
         }])
+      },
+      onParsingProgress: (progress: {file_type: string, parsed: number, total: number, percentage: number}) => {
+        setParsingProgress(prev => ({
+          ...prev,
+          [progress.file_type]: {
+            parsed: progress.parsed,
+            total: progress.total,
+            percentage: progress.percentage
+          }
+        }))
+      },
+      onProcessingComplete: (message: string) => {
+        // Add completion message to chat
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: message,
+          timestamp: new Date().toISOString()
+        }])
+        // Set processing to false
+        setIsProcessing(false)
+        console.log('✅ Processing completed:', message)
+      },
+      onProcessingError: (message: string, error?: string) => {
+        // Add error message to chat
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: message,
+          timestamp: new Date().toISOString()
+        }])
+        // Set processing to false
+        setIsProcessing(false)
+        console.error('❌ Processing failed:', message, error)
       }
     })
 
@@ -148,6 +193,7 @@ export default function Home() {
     if (uploadedFiles.length === 0) return
 
     setIsProcessing(true)
+    setParsingProgress({}) // Reset parsing progress for new session
     // Ensure WS is connected before sending
     try {
       const u = authService.getCurrentUser()
@@ -213,6 +259,33 @@ export default function Home() {
   return (
     <div className="flex h-screen flex-col bg-background">
       {isProcessing && totalQuestions > 0 && <ProgressBar current={currentQuestion} total={totalQuestions} />}
+
+      {/* Test Section: Parsing Progress Display */}
+      {isProcessing && Object.keys(parsingProgress).length > 0 && (
+        <div className="border-b border-border bg-muted/30 px-6 py-3">
+          <div className="mx-auto max-w-3xl">
+            <h3 className="mb-2 text-sm font-semibold text-foreground">Test: Document Parsing Progress</h3>
+            <div className="space-y-2">
+              {Object.entries(parsingProgress).map(([fileType, progress]) => (
+                <div key={fileType} className="text-xs">
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="font-medium text-card-foreground capitalize">{fileType} Files:</span>
+                    <span className="text-muted-foreground">
+                      {progress.parsed} / {progress.total} ({progress.percentage}%)
+                    </span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-secondary">
+                    <div
+                      className="h-full rounded-full bg-blue-500 transition-all duration-300"
+                      style={{ width: `${progress.percentage}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-1 overflow-hidden">
         <FileUploadSidebar

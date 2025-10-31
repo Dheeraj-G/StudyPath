@@ -284,11 +284,62 @@ async def delete_file(
                 detail="File not found"
             )
         
-        # Delete from GCS
+        # Get derived assets before deletion to find processed files in GCS
+        derived_assets = []
+        try:
+            derived_assets = await firestore_service.list_derived_assets(
+                current_user["uid"],
+                file_id
+            )
+        except Exception as e:
+            print(f"Warning: Could not list derived assets for file {file_id}: {e}")
+        
+        # Delete processed files from GCS (extracted images, processed content, etc.)
+        processed_files_deleted = 0
+        
+        # Delete files referenced in derived assets
+        for asset in derived_assets:
+            gcs_path = asset.get("gcs_path")
+            if gcs_path:
+                try:
+                    if gcs_service.delete_file(gcs_path):
+                        processed_files_deleted += 1
+                except Exception as e:
+                    print(f"Warning: Could not delete processed file {gcs_path}: {e}")
+        
+        # Also delete processed files that might be stored by file name pattern
+        # Processed images are stored at: users/{user_id}/processed/images/{filename}
+        file_name = file_metadata.get("file_name", "")
+        if file_name:
+            # Extract base name without extension for pattern matching
+            base_name = file_name.rsplit('.', 1)[0] if '.' in file_name else file_name
+            processed_prefix = f"users/{current_user['uid']}/processed/images/{base_name}"
+            try:
+                count = gcs_service.delete_files_by_prefix(processed_prefix)
+                processed_files_deleted += count
+            except Exception as e:
+                print(f"Warning: Could not delete processed files by prefix {processed_prefix}: {e}")
+        
+        if processed_files_deleted > 0:
+            print(f"Deleted {processed_files_deleted} processed files from GCS for file {file_id}")
+        
+        # Delete the original file from GCS
         success = gcs_service.delete_file(file_metadata["file_path"])
         
         if success:
-            # Delete from Firestore
+            # Delete parsed content associated with this file
+            try:
+                parsed_deleted = await firestore_service.delete_parsed_content_for_file(
+                    current_user["uid"],
+                    file_metadata["file_path"]
+                )
+                if parsed_deleted:
+                    print(f"Deleted parsed content for file {file_id}")
+            except Exception as e:
+                print(f"Warning: Error deleting parsed content for file {file_id}: {e}")
+                # Continue with file deletion even if parsed content deletion fails
+            
+            # Delete from Firestore (this will recursively delete derived_assets subcollection)
             await firestore_service.delete_file_metadata(current_user["uid"], file_id)
             
             return {

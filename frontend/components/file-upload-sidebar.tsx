@@ -272,13 +272,22 @@ export function FileUploadSidebar({
       </div>
 
       <div className="border-t border-sidebar-border p-4">
-        <Button className="w-full" onClick={onStartProcessing} disabled={files.length === 0 || isProcessing}>
+        <Button 
+          className="w-full" 
+          onClick={onStartProcessing} 
+          disabled={uploadedFiles.length === 0 || isProcessing}
+        >
           <Play className="mr-2 h-4 w-4" />
           {isProcessing ? "Processing..." : "Start Learning Session"}
         </Button>
-        {files.length > 0 && !isProcessing && (
+        {uploadedFiles.length > 0 && !isProcessing && (
           <p className="mt-2 text-center text-xs text-muted-foreground">
-            {files.length} file{files.length !== 1 ? "s" : ""} ready
+            {uploadedFiles.length} document{uploadedFiles.length !== 1 ? "s" : ""} ready
+          </p>
+        )}
+        {uploadedFiles.length === 0 && !isProcessing && (
+          <p className="mt-2 text-center text-xs text-muted-foreground">
+            Upload files to get started
           </p>
         )}
       </div>
