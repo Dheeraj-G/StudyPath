@@ -95,13 +95,35 @@ async def pdf_node(state: GraphState) -> Dict[str, Any]:
 async def image_node(state: GraphState) -> Dict[str, Any]:
     input_data: ParseInput = state.get("input")
     image_inputs: List[str] = []
+    processed_urls: List[str] = []
+    
+    # Check if we already have an image_result (from a previous run)
+    existing_result = state.get("image_result", {})
+    if existing_result and isinstance(existing_result, dict):
+        processed_urls = existing_result.get("urls", [])
+    
+    # Check for direct image files first
     if input_data and input_data.image_paths:
-        image_inputs.extend(input_data.image_paths)
+        # Filter out already processed URLs
+        new_images = [img for img in input_data.image_paths if img not in processed_urls]
+        if new_images:
+            image_inputs.extend(new_images)
+            print(f"🖼️ Image node: Found {len(new_images)} new direct image file(s)")
+    
+    # Check for images extracted from PDFs (this requires PDF node to complete first)
     pdf_result = state.get("pdf_result")
-    if pdf_result and pdf_result.get("derived_image_urls"):
-        image_inputs.extend(pdf_result.get("derived_image_urls", []))
+    if pdf_result:
+        derived_images = pdf_result.get("derived_image_urls", [])
+        if derived_images:
+            # Filter out already processed URLs
+            new_derived = [img for img in derived_images if img not in processed_urls]
+            if new_derived:
+                image_inputs.extend(new_derived)
+                print(f"🖼️ Image node: Found {len(new_derived)} new image(s) extracted from PDF(s)")
+    
     if image_inputs and input_data:
         total_images = len(image_inputs)
+        print(f"🖼️ Image node: Processing {total_images} image(s)")
         # Send progress update
         try:
             if _ws_manager:
@@ -119,7 +141,34 @@ async def image_node(state: GraphState) -> Dict[str, Any]:
             pass
         
         agent = ImageParserAgent()
-        result = await agent.parse(input_data.user_id, image_inputs)
+        new_result = await agent.parse(input_data.user_id, image_inputs)
+        
+        # Merge with existing result if present
+        if existing_result and isinstance(existing_result, dict):
+            # Combine URLs (avoid duplicates)
+            existing_urls = existing_result.get("urls", [])
+            new_urls = new_result.get("urls", [])
+            all_urls = list(set(existing_urls + new_urls))
+            
+            # Combine OCR texts
+            existing_ocr = existing_result.get("ocr_texts", [])
+            new_ocr = new_result.get("ocr_texts", [])
+            all_ocr_texts = existing_ocr + new_ocr
+            
+            # Combine raw content (concatenate)
+            existing_raw = existing_result.get("raw", "")
+            new_raw = new_result.get("raw", "")
+            combined_raw = (existing_raw + "\n\n" + new_raw) if existing_raw and new_raw else (existing_raw or new_raw)
+            
+            result = {
+                "type": "image",
+                "urls": all_urls,
+                "ocr_texts": all_ocr_texts,
+                "raw": combined_raw
+            }
+            print(f"🖼️ Image node: Merged results - total {len(all_urls)} image(s), {len(all_ocr_texts)} OCR texts")
+        else:
+            result = new_result
         
         # Send completion update
         try:
@@ -137,6 +186,10 @@ async def image_node(state: GraphState) -> Dict[str, Any]:
             pass
         
         return {"image_result": result}
+    
+    # Return existing result if present, otherwise empty dict
+    if existing_result:
+        return {"image_result": existing_result}
     return {}
 
 
@@ -287,8 +340,28 @@ def build_graph() -> StateGraph:
     graph.add_node("store", store_node)
 
     graph.add_edge(START, "pdf")
-    graph.add_edge(START, "image")
     graph.add_edge(START, "audio")
+    
+    # Image node needs to run after PDF node to access derived_image_urls
+    # Only start image node from START if there are direct image_paths
+    # Otherwise, it will run after PDF completes to process derived images
+    def should_run_image_from_start(state: GraphState) -> str:
+        """Check if image node should run from start (direct images) or wait for PDF"""
+        input_data = state.get("input")
+        if input_data and input_data.image_paths:
+            # Direct image files - run immediately
+            return "image"
+        else:
+            # No direct images - skip to wait, will process derived images after PDF
+            return "wait_for_results"
+    
+    graph.add_conditional_edges(START, should_run_image_from_start, {
+        "image": "image",
+        "wait_for_results": "wait_for_results"
+    })
+    
+    # Image node also runs after PDF to process derived images
+    graph.add_edge("pdf", "image")
 
     # Option 1: Avoid fan-in by routing all three nodes to a wait node first
     # Then only one edge goes from wait node to consolidate

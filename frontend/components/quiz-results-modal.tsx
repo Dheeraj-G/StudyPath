@@ -322,11 +322,11 @@ function TreeView({
   return (
     <div className="mb-6 w-full">
       <h3 className="text-lg font-semibold mb-4 text-center">{tree.root_concept}</h3>
-      <div className="flex justify-center w-full bg-white rounded-lg border" style={{ height: '500px', overflow: 'auto' }}>
+      <div className="flex justify-center w-full bg-white rounded-lg border" style={{ height: '500px', overflow: 'auto', width: '80%', margin: '0 auto' }}>
         <Tree
           data={d3Data}
           orientation="vertical"
-          translate={{ x: containerWidth / 2, y: 50 }}
+          translate={{ x: (containerWidth * 0.8) / 2, y: 50 }}
           nodeSize={{ x: 200, y: 120 }}
           renderCustomNodeElement={renderCustomNode}
           pathClassFunc={() => 'tree-link'}
@@ -357,8 +357,11 @@ export function QuizResultsModal({ isOpen, trees, quizResults, onClose }: QuizRe
   useEffect(() => {
     const updateDimensions = () => {
       if (treeContainerRef.current) {
+        // Calculate 80% of the modal width (modal is 80vw, so tree should be 80% of that = 64vw)
+        const modalWidth = window.innerWidth * 0.8
+        const treeWidth = modalWidth * 0.8
         setDimensions({
-          width: treeContainerRef.current.offsetWidth || window.innerWidth * 0.8 * 0.9,
+          width: treeWidth,
           height: 500
         })
       }
@@ -405,7 +408,7 @@ export function QuizResultsModal({ isOpen, trees, quizResults, onClose }: QuizRe
                 </p>
               </div>
               
-              <div ref={treeContainerRef} className="flex flex-col items-center gap-4">
+              <div ref={treeContainerRef} className="flex flex-col items-center gap-4 w-full">
                 {trees.map((tree, idx) => (
                   <TreeView 
                     key={`tree-${idx}`} 

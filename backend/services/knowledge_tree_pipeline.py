@@ -81,9 +81,22 @@ async def retrieve_parsed_content_node(state: KnowledgeTreeState) -> Dict[str, A
             # Merge image results
             image_data = doc_data.get("image", {})
             if image_data and isinstance(image_data, dict):
+                # Handle two possible structures:
+                # 1. Structure with "results" array (like PDF)
                 image_results = image_data.get("results", [])
                 if image_results:
                     all_parsed_content["image"]["results"].extend(image_results)
+                # 2. Structure with "raw" field directly (from image parser)
+                elif image_data.get("raw") or image_data.get("urls"):
+                    # Convert to results format for consistency
+                    # Create a result object with the raw content as llm_output
+                    raw_content = image_data.get("raw", "")
+                    if raw_content:
+                        all_parsed_content["image"]["results"].append({
+                            "llm_output": raw_content,
+                            "urls": image_data.get("urls", []),
+                            "type": "image"
+                        })
             
             # Merge audio results
             audio_data = doc_data.get("audio", {})
