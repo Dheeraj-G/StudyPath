@@ -11,7 +11,7 @@ export interface ChatMessage {
 }
 
 export interface WebSocketMessage {
-  type: 'chat' | 'file_upload' | 'response' | 'error' | 'ping' | 'agent_response' | 'parsing_progress' | 'processing_complete' | 'processing_error';
+  type: 'chat' | 'file_upload' | 'response' | 'error' | 'ping' | 'agent_response' | 'parsing_progress' | 'processing_complete' | 'processing_error' | 'knowledge_tree_progress' | 'knowledge_tree_complete' | 'knowledge_tree_error';
   content?: string;
   data?: any;
   timestamp: string;
@@ -33,6 +33,7 @@ export interface WebSocketCallbacks {
   onParsingProgress?: (progress: ParsingProgress) => void;
   onProcessingComplete?: (message: string, data?: any) => void;
   onProcessingError?: (message: string, error?: string) => void;
+  onKnowledgeTreeProgress?: (message: string, data?: any) => void;
 }
 
 class WebSocketService {
@@ -144,12 +145,43 @@ class WebSocketService {
     switch (message.type) {
       case 'response':
         if (message.content) {
-          const content = typeof message.content === 'string' ? message.content : JSON.stringify(message.content)
-          this.callbacks.onMessage?.({
-            role: 'assistant',
-            content,
-            timestamp: message.timestamp,
-          });
+          let content: string
+          let parsed: any
+          
+          try {
+            // Try to parse if it's a string, otherwise use as-is
+            if (typeof message.content === 'string') {
+              content = message.content
+              try {
+                parsed = JSON.parse(content)
+              } catch {
+                parsed = content
+              }
+            } else {
+              parsed = message.content
+              content = JSON.stringify(message.content)
+            }
+            
+            // Filter out file upload completion messages
+            if (content.includes('File upload completed, starting processing') || 
+                (parsed && typeof parsed === 'object' && parsed.message === 'File upload completed, starting processing...')) {
+              return // Don't add this message to chat
+            }
+            
+            // Filter out empty responses
+            if (parsed && typeof parsed === 'object' && Object.keys(parsed).length === 0) {
+              return // Don't add empty responses to chat
+            }
+            
+            this.callbacks.onMessage?.({
+              role: 'assistant',
+              content,
+              timestamp: message.timestamp,
+            });
+          } catch (error) {
+            // If parsing fails, just skip
+            return
+          }
         }
         break;
       
@@ -179,14 +211,7 @@ class WebSocketService {
           message.content || 'Processing completed successfully',
           message.data
         );
-        // Also add as a regular message
-        if (message.content) {
-          this.callbacks.onMessage?.({
-            role: 'assistant',
-            content: message.content,
-            timestamp: message.timestamp,
-          });
-        }
+        // Don't add to chat messages - only show notification
         break;
       
       case 'processing_error':
@@ -194,13 +219,27 @@ class WebSocketService {
           message.content || 'Processing failed',
           message.data?.error
         );
-        // Also add as an error message
+        // Don't add to chat messages - only show notification
+        break;
+      
+      case 'knowledge_tree_progress':
+        // Handle knowledge tree progress (generation started)
+        this.callbacks.onKnowledgeTreeProgress?.(
+          message.content || 'Generating questions...',
+          message.data
+        );
+        break;
+      
+      case 'knowledge_tree_complete':
+      case 'knowledge_tree_error':
+        // Handle knowledge tree completion/error
         if (message.content) {
-          this.callbacks.onMessage?.({
-            role: 'assistant',
-            content: message.content,
-            timestamp: message.timestamp,
-          });
+          const type = message.type === 'knowledge_tree_complete' ? 'success' : 'error';
+          if (type === 'success') {
+            this.callbacks.onProcessingComplete?.(message.content, message.data);
+          } else if (type === 'error') {
+            this.callbacks.onProcessingError?.(message.content, message.data?.error);
+          }
         }
         break;
       

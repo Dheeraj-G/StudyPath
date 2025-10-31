@@ -188,6 +188,13 @@ async def wait_for_results_node(state: GraphState) -> Dict[str, Any]:
     This node is called by all three parsing nodes and only proceeds when all are done.
     Returns empty dict to just pass through state.
     """
+    input_data = state.get("input")
+    if input_data:
+        pdf_count = len(input_data.pdf_paths) if input_data.pdf_paths else 0
+        image_count = len(input_data.image_paths) if input_data.image_paths else 0
+        audio_count = len(input_data.audio_paths) if input_data.audio_paths else 0
+        print(f"⏳ Wait node: Checking completion status (PDF: {pdf_count}, Image: {image_count}, Audio: {audio_count})")
+        print(f"⏳ Wait node: Results present - PDF: {bool(state.get('pdf_result'))}, Image: {bool(state.get('image_result'))}, Audio: {bool(state.get('audio_result'))}")
     # This node just passes state through, no modification needed
     # The conditional edge will route to consolidate when all results are ready
     return {}
@@ -197,10 +204,15 @@ async def consolidate_node(state: GraphState) -> Dict[str, Any]:
     Consolidate results from pdf, image, and audio nodes.
     Extract results directly from state.
     """
+    print("🔗 Consolidate node: Starting consolidation...")
     # Extract results from state
     pdf_res = state.get("pdf_result") or {}
     image_res = state.get("image_result") or {}
     audio_res = state.get("audio_result") or {}
+    
+    print(f"🔗 Consolidate node: PDF result size: {len(str(pdf_res))} chars")
+    print(f"🔗 Consolidate node: Image result size: {len(str(image_res))} chars")
+    print(f"🔗 Consolidate node: Audio result size: {len(str(audio_res))} chars")
     
     consolidated: Dict[str, Any] = {
         "pdf": pdf_res,
@@ -221,10 +233,12 @@ async def consolidate_node(state: GraphState) -> Dict[str, Any]:
     if state.get("input"):
         result["input"] = state["input"]
     
+    print("🔗 Consolidate node: Consolidation complete")
     return result
 
 
 async def store_node(state: GraphState) -> Dict[str, Any]:
+    print("💾 Store node: Starting to store parsed content in Firestore...")
     data = {
         "pdf": state.get("pdf_result"),
         "image": state.get("image_result"),
@@ -234,7 +248,8 @@ async def store_node(state: GraphState) -> Dict[str, Any]:
     # Store in Firestore under users/{uid}/parsed_content
     try:
         await firestore_service._ensure_initialized()  # type: ignore[attr-defined]
-    except Exception:
+    except Exception as e:
+        print(f"⚠️ Store node: Firestore initialization error: {e}")
         pass
     # Use generic write via Firestore client available on service
     if firestore_service.db:
@@ -251,9 +266,14 @@ async def store_node(state: GraphState) -> Dict[str, Any]:
         data["file_paths"] = file_paths
         data["processed_at"] = datetime.utcnow().isoformat()
         
+        print(f"💾 Store node: Storing for user {user_id} with {len(file_paths)} file paths")
         col = firestore_service.db.collection("users").document(user_id).collection("parsed_content")
         doc = col.document()
         doc.set(data)
+        print(f"💾 Store node: Successfully stored parsed content with doc ID: {doc.id}")
+    else:
+        print("⚠️ Store node: Firestore db is None, skipping storage")
+    print("💾 Store node: Complete")
     return {}
 
 
@@ -320,6 +340,11 @@ graph_app = build_graph().compile()
 
 
 async def run_pipeline(user_id: str, pdf_paths: List[str], image_paths: List[str], audio_paths: List[str]) -> Dict[str, Any]:
+    print(f"📄 LangGraph Pipeline: Starting for user {user_id}")
+    print(f"📄 PDF paths: {len(pdf_paths)} files")
+    print(f"📄 Image paths: {len(image_paths)} files")
+    print(f"📄 Audio paths: {len(audio_paths)} files")
+    
     state: GraphState = {
         "input": ParseInput(user_id=user_id, pdf_paths=pdf_paths, image_paths=image_paths, audio_paths=audio_paths),
         "pdf_result": None,
@@ -327,7 +352,11 @@ async def run_pipeline(user_id: str, pdf_paths: List[str], image_paths: List[str
         "audio_result": None,
         "consolidated": None
     }
+    
+    print("📄 Invoking LangGraph pipeline (this may take a while)...")
     final_state: GraphState = await graph_app.ainvoke(state)
+    print(f"📄 LangGraph Pipeline: Completed. Results: pdf={bool(final_state.get('pdf_result'))}, image={bool(final_state.get('image_result'))}, audio={bool(final_state.get('audio_result'))}")
+    
     return {
         "consolidated": final_state.get("consolidated"),
         "pdf": final_state.get("pdf_result"),

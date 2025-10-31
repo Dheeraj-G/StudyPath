@@ -224,10 +224,45 @@ async def start_learning_session(
             except Exception as ws_error:
                 print(f"Warning: Could not send skip notification: {ws_error}")
             
+            # Still trigger knowledge tree generation even if files were skipped
+            print("🌳 All files already processed, but still generating knowledge trees from existing parsed content...")
+            try:
+                from services.knowledge_tree_pipeline import run_knowledge_tree_pipeline, set_ws_manager as set_kt_ws_manager
+                from main import manager as ws_manager
+                
+                # Set WebSocket manager for knowledge tree progress updates
+                set_kt_ws_manager(ws_manager)
+                
+                # Trigger knowledge tree generation from existing parsed content
+                print("🌳 Calling run_knowledge_tree_pipeline from knowledge_tree.py...")
+                await run_knowledge_tree_pipeline(
+                    user_id=user_id,
+                    session_id=session_id
+                )
+                print("✅ Knowledge tree generation completed for skipped files scenario")
+                
+                # Send notification about knowledge tree completion
+                try:
+                    await ws_manager.send_personal_message({
+                        "type": "knowledge_tree_complete",
+                        "content": "✅ Knowledge trees have been generated from your existing documents!",
+                        "data": {
+                            "session_id": session_id,
+                            "status": "completed"
+                        },
+                        "timestamp": datetime.utcnow().isoformat()
+                    }, user_id)
+                except Exception as kt_ws_error:
+                    print(f"Warning: Could not send knowledge tree completion notification: {kt_ws_error}")
+            except Exception as kt_error:
+                print(f"⚠️ Error generating knowledge trees for skipped files: {kt_error}")
+                import traceback
+                traceback.print_exc()
+            
             return {
                 "session_id": session_id,
                 "status": "skipped",
-                "message": "All documents have already been processed."
+                "message": "All documents have already been processed. Knowledge trees are being generated from existing parsed content."
             }
         
         # Run the learning session pipeline in background
@@ -240,7 +275,11 @@ async def start_learning_session(
         
         async def run_pipeline_background():
             try:
+                print(f"🚀 Starting background pipeline for user: {user_id}")
+                print(f"🚀 Number of files to process: {len(user_files)}")
+                
                 # Mark files as processing before starting
+                print("📝 Step 1: Marking files as processing...")
                 for file in user_files:
                     file_id = file.get('file_id')
                     if file_id:
@@ -252,10 +291,14 @@ async def start_learning_session(
                             )
                         except Exception as e:
                             print(f"Warning: Could not update file status to processing: {e}")
+                print("✅ Step 1 complete: Files marked as processing")
                 
-                await run_learning_session_pipeline(user_id, user_files)
+                print("📝 Step 2: Starting document parsing pipeline...")
+                result = await run_learning_session_pipeline(user_id, user_files)
+                print(f"✅ Step 2 complete: Document parsing finished. Result keys: {list(result.keys()) if result else 'None'}")
                 
                 # Mark files as processed after successful completion
+                print("📝 Step 3: Marking files as processed...")
                 for file in user_files:
                     file_id = file.get('file_id')
                     if file_id:
@@ -268,8 +311,10 @@ async def start_learning_session(
                             )
                         except Exception as e:
                             print(f"Warning: Could not update file status to processed: {e}")
+                print("✅ Step 3 complete: Files marked as processed")
                 
                 # Update session status to completed
+                print("📝 Step 4: Updating session status to completed...")
                 # Firestore update() is synchronous, not async
                 if firestore_service.db:
                     firestore_service.db.collection('users').document(user_id)\
@@ -277,8 +322,10 @@ async def start_learning_session(
                             'status': 'completed',
                             'updated_at': None  # Firestore will set timestamp
                         })
+                print("✅ Step 4 complete: Session status updated")
                 
                 # Send completion notification via WebSocket
+                print("📝 Step 5: Sending completion notification via WebSocket...")
                 try:
                     await ws_manager.send_personal_message({
                         "type": "processing_complete",
@@ -289,8 +336,63 @@ async def start_learning_session(
                         },
                         "timestamp": datetime.utcnow().isoformat()
                     }, user_id)
+                    print("✅ Step 5 complete: Notification sent")
                 except Exception as ws_error:
-                    print(f"Warning: Could not send completion notification: {ws_error}")
+                    print(f"⚠️ Warning: Could not send completion notification: {ws_error}")
+                
+                # Automatically trigger knowledge tree generation after all documents are processed
+                print("📝 Step 6: Starting knowledge tree generation...")
+                print("="*80)
+                print("🌳 KNOWLEDGE_TREE.PY: Automatically triggered from langgraph_orchestrator.py")
+                print("="*80)
+                try:
+                    print("🌳 Automatically starting knowledge tree generation after document processing...")
+                    from services.knowledge_tree_pipeline import run_knowledge_tree_pipeline, set_ws_manager as set_kt_ws_manager
+                    
+                    # Set WebSocket manager for knowledge tree progress updates
+                    set_kt_ws_manager(ws_manager)
+                    
+                    # Trigger knowledge tree generation
+                    print("🌳 Calling run_knowledge_tree_pipeline from langgraph_orchestrator...")
+                    kt_result = await run_knowledge_tree_pipeline(
+                        user_id=user_id,
+                        session_id=session_id
+                    )
+                    print(f"✅ Step 6 complete: Knowledge tree generation finished. Result: {kt_result}")
+                    print("✅ Knowledge tree generation completed successfully")
+                    
+                    # Send notification about knowledge tree completion
+                    try:
+                        await ws_manager.send_personal_message({
+                            "type": "knowledge_tree_complete",
+                            "content": "✅ Knowledge trees have been generated from your documents!",
+                            "data": {
+                                "session_id": session_id,
+                                "status": "completed"
+                            },
+                            "timestamp": datetime.utcnow().isoformat()
+                        }, user_id)
+                    except Exception as kt_ws_error:
+                        print(f"Warning: Could not send knowledge tree completion notification: {kt_ws_error}")
+                        
+                except Exception as kt_error:
+                    print(f"⚠️ Error generating knowledge trees automatically: {kt_error}")
+                    import traceback
+                    traceback.print_exc()
+                    # Don't fail the whole pipeline if knowledge tree generation fails
+                    try:
+                        await ws_manager.send_personal_message({
+                            "type": "knowledge_tree_error",
+                            "content": f"⚠️ Knowledge tree generation encountered an issue: {str(kt_error)}",
+                            "data": {
+                                "session_id": session_id,
+                                "status": "error",
+                                "error": str(kt_error)
+                            },
+                            "timestamp": datetime.utcnow().isoformat()
+                        }, user_id)
+                    except:
+                        pass
                     
             except Exception as e:
                 print(f"Learning session pipeline error: {e}")

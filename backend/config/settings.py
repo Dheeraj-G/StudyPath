@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     GROQ_PDF_MODEL: str = os.getenv("GROQ_PDF_MODEL", "llama-3.1-70b-versatile")
     GROQ_IMAGE_MODEL: str = os.getenv("GROQ_IMAGE_MODEL", "llama-3.2-11b-vision-preview")
     GROQ_AUDIO_MODEL: str = os.getenv("GROQ_AUDIO_MODEL", "llama-3.1-8b-instant")
+    GROQ_KNOWLEDGE_TREE_MODEL: str = os.getenv("GROQ_KNOWLEDGE_TREE_MODEL", "llama-3.1-8b-instant")
     
     # Pub/Sub settings
     PUBSUB_TOPIC_NAME: str = os.getenv("PUBSUB_TOPIC_NAME", "studypath-processing")

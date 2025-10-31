@@ -17,6 +17,7 @@ from auth.firebase_auth import verify_firebase_token, get_user_info
 from websocket.connection_manager import ConnectionManager
 from routes.file_upload import router as file_router
 from routes.langgraph_orchestrator import router as orchestrator_router
+from routes.knowledge_tree import router as knowledge_tree_router
 from config.settings import get_settings
 
 # Initialize FastAPI app
@@ -44,6 +45,7 @@ manager = ConnectionManager()
 # Include routers
 app.include_router(file_router, prefix="/api/files", tags=["files"])
 app.include_router(orchestrator_router, prefix="/api/orchestrator", tags=["orchestrator"])
+app.include_router(knowledge_tree_router, prefix="/api/knowledge-trees", tags=["knowledge-trees"])
 
 @app.get("/")
 async def root():
@@ -92,17 +94,27 @@ async def process_chat_message(user_id: str, message_data: Dict) -> Dict:
         if message_type == "chat":
             # Route to LangGraph orchestrator
             response = await route_to_langgraph(user_id, message_content)
+            return {
+                "type": "response",
+                "content": response,
+                "timestamp": datetime.utcnow().isoformat()
+            }
         elif message_type == "file_upload":
-            # Handle file upload completion
-            response = await handle_file_upload_completion(user_id, message_data)
+            # Handle file upload completion - don't send response to chat
+            await handle_file_upload_completion(user_id, message_data)
+            # Return empty response - don't add to chat
+            return {
+                "type": "response",
+                "content": {},
+                "timestamp": datetime.utcnow().isoformat()
+            }
         else:
             response = {"error": "Unknown message type"}
-            
-        return {
-            "type": "response",
-            "content": response,
-            "timestamp": datetime.utcnow().isoformat()
-        }
+            return {
+                "type": "response",
+                "content": response,
+                "timestamp": datetime.utcnow().isoformat()
+            }
         
     except Exception as e:
         return {
@@ -123,10 +135,8 @@ async def route_to_langgraph(user_id: str, message: str) -> Dict:
 async def handle_file_upload_completion(user_id: str, message_data: Dict) -> Dict:
     """Handle file upload completion notification"""
     # This will trigger the LangGraph orchestrator to process uploaded files
-    return {
-        "message": "File upload completed, starting processing...",
-        "status": "processing"
-    }
+    # Return empty response to avoid adding message to chat
+    return {}
 
 if __name__ == "__main__":
     settings = get_settings()

@@ -575,6 +575,70 @@ class FirestoreService:
         except Exception as e:
             print(f"Error deleting parsed content for file {file_path}: {str(e)}")
             return False
+    
+    # Knowledge Tree Operations
+    async def get_knowledge_trees(self, user_id: str, tree_id: Optional[str] = None) -> Optional[Dict]:
+        """Get knowledge trees for a user"""
+        self._ensure_initialized()
+        
+        if not self.db:
+            return None
+        
+        try:
+            trees_col = self.db.collection('users').document(user_id).collection('knowledge_trees')
+            
+            if tree_id:
+                # Get specific knowledge tree
+                doc_ref = trees_col.document(tree_id)
+                doc = doc_ref.get()
+                if doc.exists:
+                    tree_data = doc.to_dict()
+                    tree_data['tree_id'] = doc.id
+                    return tree_data
+                return None
+            else:
+                # Get latest knowledge tree
+                docs = trees_col.order_by('created_at', direction=firestore.Query.DESCENDING)\
+                    .limit(1).stream()
+                
+                for doc in docs:
+                    tree_data = doc.to_dict()
+                    tree_data['tree_id'] = doc.id
+                    return tree_data
+                
+                return None
+                
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error getting knowledge trees: {str(e)}"
+            )
+    
+    async def list_knowledge_trees(self, user_id: str, limit: int = 50) -> List[Dict]:
+        """List all knowledge trees for a user"""
+        self._ensure_initialized()
+        
+        if not self.db:
+            return []
+        
+        try:
+            trees_col = self.db.collection('users').document(user_id).collection('knowledge_trees')
+            docs = trees_col.order_by('created_at', direction=firestore.Query.DESCENDING)\
+                .limit(limit).stream()
+            
+            trees = []
+            for doc in docs:
+                tree_data = doc.to_dict()
+                tree_data['tree_id'] = doc.id
+                trees.append(tree_data)
+            
+            return trees
+            
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error listing knowledge trees: {str(e)}"
+            )
 
 # Global Firestore service instance
 firestore_service = FirestoreService()
