@@ -190,11 +190,27 @@ class FileUploadService {
       'image/png',
       'image/gif',
       'video/mp4',
+      'video/mpeg',
+      'video/quicktime',
       'audio/mpeg',
       'audio/wav',
+      'audio/mp3',
+      // Also check by file extension as fallback (browser may not set MIME type correctly)
     ];
     
-    return allowedTypes.includes(file.type);
+    // Check by MIME type
+    if (allowedTypes.includes(file.type)) {
+      return true;
+    }
+    
+    // Fallback: Check by file extension for audio files
+    const fileName = file.name.toLowerCase();
+    const audioExtensions = ['.mp3', '.wav', '.m4a', '.aac'];
+    if (audioExtensions.some(ext => fileName.endsWith(ext))) {
+      return true;
+    }
+    
+    return false;
   }
 
   // Utility method to validate file size (100MB limit)
